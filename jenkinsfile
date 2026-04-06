@@ -1,0 +1,99 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION      = "ap-south-1"
+        ECR_URL         = "433365435200.dkr.ecr.ap-south-1.amazonaws.com"
+        APP_NAME        = "servicenow-ai-app"
+        CLUSTER_NAME    = "servicenow-eks"
+        HELM_CHART_PATH = "./servicenow"
+        RELEASE_NAME    = "servicenow-release"
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/srishtis981/ai-ticket-automation-devops.git'
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID',
+                           variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY',
+                           variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh '''
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        aws ecr get-login-password --region $AWS_REGION | \
+                        docker login --username AWS --password-stdin $ECR_URL
+                    '''
+                }
+            }
+        }
+
+        stage('Connect to EKS') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID',
+                           variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY',
+                           variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh '''
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        aws eks update-kubeconfig \
+                        --region $AWS_REGION \
+                        --name $CLUSTER_NAME
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh '''
+                    helm upgrade --install $RELEASE_NAME $HELM_CHART_PATH \
+                    --set image.repository=$ECR_URL/$APP_NAME \
+                    --set image.tag=latest \
+                    --namespace default \
+                    --wait \
+                    --timeout 5m
+                '''
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                sh '''
+                    kubectl get pods -n default
+                    kubectl rollout status deployment/$RELEASE_NAME -n default
+                    echo "Deployment verified!"
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            slackSend(
+                channel: '#deployments',
+                color: 'good',
+                message: "SUCCESS: ${APP_NAME} deployed! Build #${BUILD_NUMBER}"
+            )
+        }
+        failure {
+            slackSend(
+                channel: '#deployments',
+                color: 'danger',
+                message: "FAILED: ${APP_NAME} Build #${BUILD_NUMBER}"
+            )
+        }
+    }
+}
