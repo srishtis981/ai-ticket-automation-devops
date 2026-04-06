@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: 433365435200.dkr.ecr.ap-south-1.amazonaws.com/servicenow-ai-app
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080
+
+env:
+  SERVICENOW_INSTANCE_URL: "https://dev364407.service-now.com/"
+  SERVICENOW_USERNAME: "admin"
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "200m"
+    memory: "200Mi"
